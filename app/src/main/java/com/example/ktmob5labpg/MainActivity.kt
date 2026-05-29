@@ -109,7 +109,7 @@ class MainActivity : AppCompatActivity() {
         when (text) {
             "C" -> {
                 playSound(soundClear)
-                showClearConfirmationDialog()
+                clearAll()
             }
             "=" -> {
                 playSound(soundEq)
@@ -137,14 +137,65 @@ class MainActivity : AppCompatActivity() {
             }
         }
     }
+    private fun clearAll() {
+        currentInput = ""
+        currentResult = ""
+        tvFormula.text = ""
+        tvResult.text = "0"
+        justCalculated = false
+        saveData()
+    }
 
     private fun appendToFormula(value: String) {
+        val operators = listOf('+', '-', '*', '/')  // Теперь это List<Char>
+
         if (justCalculated) {
-            // Если только что посчитали — начинаем новое выражение с чистого листа
             currentInput = ""
             tvFormula.text = ""
             justCalculated = false
         }
+
+        // Получаем текущее число (после последнего оператора)
+        val lastOperatorIndex = currentInput.indexOfLast { it in operators }
+        val currentNumber = if (lastOperatorIndex == -1) {
+            currentInput
+        } else {
+            currentInput.substring(lastOperatorIndex + 1)
+        }
+
+        // Если вводим цифру или точку
+        if (value !in operators.map { it.toString() }) {
+            val isNegative = currentNumber.startsWith("-") && currentNumber.length > 0
+            val numLength = if (isNegative) currentNumber.length - 1 else currentNumber.length
+
+            if (numLength >= 10 && value != ".") {
+                Toast.makeText(this, "Число не может быть длиннее 10 цифр", Toast.LENGTH_SHORT).show()
+                return
+            }
+
+            if (value == "." && currentNumber.contains(".")) {
+                return
+            }
+        }
+
+        // Если вводим оператор
+        if (value.length == 1 && value[0] in operators) {
+            if (currentInput.isEmpty() && value != "-") {
+                return
+            }
+
+            // ЗАМЕНА последнего оператора на новый
+            if (currentInput.isNotEmpty() && currentInput.last() in operators) {
+                if (currentInput.last() == '-' && value == "-") {
+                    return
+                }
+                currentInput = currentInput.dropLast(1) + value
+                tvFormula.text = currentInput
+                saveData()
+                return
+            }
+        }
+
         currentInput += value
         tvFormula.text = currentInput
         saveData()
@@ -168,37 +219,43 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun evaluateExpression(expression: String): Double {
-        val separated = expression.split("(?<=[+\\-*/])|(?=[+\\-*/])".toRegex())
-        var result = separated[0].toDouble()
-        var i = 1
-        while (i < separated.size) {
-            val operator = separated[i]
-            val operand = separated[i + 1].toDouble()
-            result = when (operator) {
-                "+" -> result + operand
-                "-" -> result - operand
-                "*" -> result * operand
-                "/" -> result / operand
-                else -> result
+        var expr = expression
+        var result = 0.0
+        var currentNumber = 0.0
+        var lastOperator = '+'
+        var i = 0
+
+        // Обработка первого отрицательного числа
+        if (expr.startsWith('-')) {
+            expr = "0$expr"
+        }
+
+        while (i < expr.length) {
+            val ch = expr[i]
+            if (ch.isDigit() || ch == '.') {
+                var j = i
+                while (j < expr.length && (expr[j].isDigit() || expr[j] == '.')) {
+                    j++
+                }
+                currentNumber = expr.substring(i, j).toDouble()
+                when (lastOperator) {
+                    '+' -> result += currentNumber
+                    '-' -> result -= currentNumber
+                    '*' -> result *= currentNumber
+                    '/' -> {
+                        if (currentNumber == 0.0) throw Exception("Деление на ноль")
+                        result /= currentNumber
+                    }
+                }
+                i = j
+            } else if (ch == '+' || ch == '-' || ch == '*' || ch == '/') {
+                lastOperator = ch
+                i++
+            } else {
+                i++
             }
-            i += 2
         }
         return result
-    }
-
-    private fun showClearConfirmationDialog() {
-        AlertDialog.Builder(this)
-            .setTitle("Очистка")
-            .setMessage("Вы действительно хотите очистить всё?")
-            .setPositiveButton("Да") { _, _ ->
-                currentInput = ""
-                currentResult = ""
-                tvFormula.text = ""
-                tvResult.text = "0"
-                saveData()
-            }
-            .setNegativeButton("Нет", null)
-            .show()
     }
 
     private fun initMusicButton() {
