@@ -416,7 +416,6 @@ class MainActivity : AppCompatActivity() {
         }
 
         // Инициализация
-        // Инициализация — НЕ пересоздаём плеер, если он уже есть
         if (musicMediaPlayer == null) {
             initPlayer(currentTrackIndex, false)
             setupCompletionListener()
