@@ -415,6 +415,7 @@ class MainActivity : AppCompatActivity() {
             }
         }
 
+
         // Инициализация
         if (musicMediaPlayer == null) {
             initPlayer(currentTrackIndex, false)
