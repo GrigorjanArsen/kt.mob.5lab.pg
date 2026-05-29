@@ -1,9 +1,16 @@
 package com.example.ktmob5labpg
 
+import android.graphics.Bitmap
+import android.graphics.BitmapFactory
 import android.media.MediaPlayer
+import android.media.MediaMetadataRetriever
 import android.os.Bundle
+import android.os.Handler
+import android.os.Looper
 import android.widget.Button
 import android.widget.ImageButton
+import android.widget.ImageView
+import android.widget.SeekBar
 import android.widget.TextView
 import android.widget.Toast
 import androidx.appcompat.app.AlertDialog
@@ -15,21 +22,29 @@ class MainActivity : AppCompatActivity() {
     private lateinit var tvFormula: TextView
     private lateinit var tvResult: TextView
 
-    private var justCalculated = false
-    private lateinit var musicMediaPlayer: MediaPlayer
     private var currentInput = ""
     private var currentResult = ""
     private var lastResult = ""
+    private var justCalculated = false
 
-    private var mediaPlayer: MediaPlayer? = null
+    // Музыкальный плеер
+    private var musicMediaPlayer: MediaPlayer? = null
+    private var currentTrackIndex = 0
+    private var isRepeatEnabled = false
+    private val trackFileNames = listOf("song_one", "song_two", "song_three")
+    private val trackDisplayNames = mutableListOf("", "", "")
+    private val trackArtists = mutableListOf("", "", "")
+    private val trackCovers = mutableListOf<Bitmap?>(null, null, null)
 
-    // Звуки для действий
+    // Звуки для кнопок калькулятора
     private var soundAdd: MediaPlayer? = null
     private var soundSub: MediaPlayer? = null
     private var soundMul: MediaPlayer? = null
     private var soundDiv: MediaPlayer? = null
     private var soundEq: MediaPlayer? = null
     private var soundClear: MediaPlayer? = null
+
+    private val mainHandler = Handler(Looper.getMainLooper())
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -39,10 +54,10 @@ class MainActivity : AppCompatActivity() {
         tvResult = findViewById(R.id.tvResult)
 
         loadSavedData()
-
         initSoundPlayers()
         initButtons()
         initMusicButton()
+        loadAllTracksMetadata()
     }
 
     private fun loadSavedData() {
@@ -75,9 +90,7 @@ class MainActivity : AppCompatActivity() {
             soundDiv = MediaPlayer.create(this, R.raw.sound_div)
             soundEq = MediaPlayer.create(this, R.raw.sound_eq)
             soundClear = MediaPlayer.create(this, R.raw.sound_clear)
-        } catch (e: Exception) {
-            // Если звуков нет — просто не проигрываются
-        }
+        } catch (e: Exception) { }
     }
 
     private fun playSound(media: MediaPlayer?) {
@@ -116,13 +129,11 @@ class MainActivity : AppCompatActivity() {
                 calculateResult()
             }
             "+", "-", "*", "/" -> {
-                // Если только что посчитали и теперь жмём оператор — подставляем результат
                 if (justCalculated) {
                     currentInput = tvResult.text.toString()
                     tvFormula.text = currentInput
                     justCalculated = false
                 }
-                // Проигрываем звук для оператора
                 when (text) {
                     "+" -> playSound(soundAdd)
                     "-" -> playSound(soundSub)
@@ -132,22 +143,13 @@ class MainActivity : AppCompatActivity() {
                 appendToFormula(text)
             }
             else -> {
-                // Цифры и точка — без звука
                 appendToFormula(text)
             }
         }
     }
-    private fun clearAll() {
-        currentInput = ""
-        currentResult = ""
-        tvFormula.text = ""
-        tvResult.text = "0"
-        justCalculated = false
-        saveData()
-    }
 
     private fun appendToFormula(value: String) {
-        val operators = listOf('+', '-', '*', '/')  // Теперь это List<Char>
+        val operators = listOf('+', '-', '*', '/')
 
         if (justCalculated) {
             currentInput = ""
@@ -155,7 +157,6 @@ class MainActivity : AppCompatActivity() {
             justCalculated = false
         }
 
-        // Получаем текущее число (после последнего оператора)
         val lastOperatorIndex = currentInput.indexOfLast { it in operators }
         val currentNumber = if (lastOperatorIndex == -1) {
             currentInput
@@ -163,7 +164,6 @@ class MainActivity : AppCompatActivity() {
             currentInput.substring(lastOperatorIndex + 1)
         }
 
-        // Если вводим цифру или точку
         if (value !in operators.map { it.toString() }) {
             val isNegative = currentNumber.startsWith("-") && currentNumber.length > 0
             val numLength = if (isNegative) currentNumber.length - 1 else currentNumber.length
@@ -178,13 +178,11 @@ class MainActivity : AppCompatActivity() {
             }
         }
 
-        // Если вводим оператор
         if (value.length == 1 && value[0] in operators) {
             if (currentInput.isEmpty() && value != "-") {
                 return
             }
 
-            // ЗАМЕНА последнего оператора на новый
             if (currentInput.isNotEmpty() && currentInput.last() in operators) {
                 if (currentInput.last() == '-' && value == "-") {
                     return
@@ -202,15 +200,13 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun calculateResult() {
-        playSound(soundEq)
         if (currentInput.isEmpty()) return
         try {
             val result = evaluateExpression(currentInput)
             val formatted = DecimalFormat("0.##########").format(result)
             currentResult = formatted
             tvResult.text = currentResult
-            // НЕ очищаем currentInput и tvFormula — оставляем выражение на месте
-            justCalculated = true  // Флаг, что только что посчитали
+            justCalculated = true
             saveData()
         } catch (e: Exception) {
             tvResult.text = "Ошибка"
@@ -225,7 +221,6 @@ class MainActivity : AppCompatActivity() {
         var lastOperator = '+'
         var i = 0
 
-        // Обработка первого отрицательного числа
         if (expr.startsWith('-')) {
             expr = "0$expr"
         }
@@ -258,10 +253,51 @@ class MainActivity : AppCompatActivity() {
         return result
     }
 
+    private fun clearAll() {
+        currentInput = ""
+        currentResult = ""
+        tvFormula.text = ""
+        tvResult.text = "0"
+        justCalculated = false
+        saveData()
+    }
+
     private fun initMusicButton() {
         val btnMusic = findViewById<ImageButton>(R.id.btnMusic)
         btnMusic.setOnClickListener {
             showMusicDialog()
+        }
+    }
+
+    private fun loadAllTracksMetadata() {
+        for (i in trackFileNames.indices) {
+            loadMetadataFromAsset(trackFileNames[i], i)
+        }
+    }
+
+    private fun loadMetadataFromAsset(fileName: String, index: Int) {
+        val retriever = MediaMetadataRetriever()
+        try {
+            val afd = assets.openFd("$fileName.mp3")
+            retriever.setDataSource(afd.fileDescriptor, afd.startOffset, afd.length)
+            afd.close()
+
+            trackDisplayNames[index] = retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_TITLE) ?: fileName
+            trackArtists[index] = retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_ARTIST) ?: "Неизвестный исполнитель"
+
+            val artworkBytes = retriever.embeddedPicture
+            trackCovers[index] = if (artworkBytes != null) {
+                BitmapFactory.decodeByteArray(artworkBytes, 0, artworkBytes.size)
+            } else {
+                null
+            }
+        } catch (e: Exception) {
+            e.printStackTrace()
+            trackDisplayNames[index] = fileName
+            trackArtists[index] = "Неизвестный исполнитель"
+            trackCovers[index] = null
+        } finally {
+            retriever.release()
         }
     }
 
@@ -272,54 +308,216 @@ class MainActivity : AppCompatActivity() {
             .create()
         dialog.window?.setBackgroundDrawableResource(android.R.color.transparent)
 
+        val ivCover = dialogView.findViewById<ImageView>(R.id.ivCover)
+        val tvTrackName = dialogView.findViewById<TextView>(R.id.tvTrackName)
+        val tvArtist = dialogView.findViewById<TextView>(R.id.tvArtist)
+        val btnPrevious = dialogView.findViewById<ImageButton>(R.id.btnPrevious)
         val btnPlay = dialogView.findViewById<ImageButton>(R.id.btnPlay)
-        val btnStop = dialogView.findViewById<ImageButton>(R.id.btnStop)
-        val btnRestart = dialogView.findViewById<Button>(R.id.btnRestart)
+        val btnPause = dialogView.findViewById<ImageButton>(R.id.btnPause)
+        val btnNext = dialogView.findViewById<ImageButton>(R.id.btnNext)
+        val btnRepeat = dialogView.findViewById<ImageButton>(R.id.btnRepeat)
+        val seekBar = dialogView.findViewById<SeekBar>(R.id.seekBar)
+        val tvCurrentTime = dialogView.findViewById<TextView>(R.id.tvCurrentTime)
+        val tvDuration = dialogView.findViewById<TextView>(R.id.tvDuration)
 
-        if (!::musicMediaPlayer.isInitialized) {
-            musicMediaPlayer = MediaPlayer.create(this, R.raw.music)
-            musicMediaPlayer.isLooping = true
+        var isSeeking = false
+        var isUserSwitching = false
+
+        fun formatTime(seconds: Int): String {
+            val mins = seconds / 60
+            val secs = seconds % 60
+            return String.format("%d:%02d", mins, secs)
         }
+
+        fun updateUIForCurrentTrack() {
+            tvTrackName.text = trackDisplayNames[currentTrackIndex]
+            tvArtist.text = trackArtists[currentTrackIndex]
+            val cover = trackCovers[currentTrackIndex]
+            if (cover != null) {
+                ivCover.setImageBitmap(cover)
+            } else {
+                ivCover.setImageResource(R.drawable.ic_default_cover)
+            }
+        }
+
+        fun releasePlayer() {
+            musicMediaPlayer?.let {
+                try {
+                    if (it.isPlaying) it.stop()
+                    it.release()
+                } catch (e: Exception) { }
+            }
+            musicMediaPlayer = null
+        }
+
+        fun initPlayer(index: Int, autoStart: Boolean = false) {
+            releasePlayer()
+            try {
+                val afd = assets.openFd("${trackFileNames[index]}.mp3")
+                musicMediaPlayer = MediaPlayer().apply {
+                    setDataSource(afd.fileDescriptor, afd.startOffset, afd.length)
+                    prepare()
+                }
+                afd.close()
+
+                musicMediaPlayer?.let { mp ->
+                    val total = mp.duration / 1000
+                    if (total > 0) {
+                        tvDuration.text = formatTime(total)
+                        seekBar.max = 100
+                        seekBar.progress = 0
+                        tvCurrentTime.text = formatTime(0)
+                    }
+                }
+                updateUIForCurrentTrack()
+
+                if (autoStart) {
+                    musicMediaPlayer?.start()
+                }
+            } catch (e: Exception) {
+                e.printStackTrace()
+                Toast.makeText(this, "Ошибка загрузки трека", Toast.LENGTH_SHORT).show()
+            }
+        }
+
+        fun setupCompletionListener() {
+            musicMediaPlayer?.setOnCompletionListener {
+                if (!isUserSwitching) {
+                    if (!isRepeatEnabled) {
+                        currentTrackIndex = (currentTrackIndex + 1) % trackFileNames.size
+                        mainHandler.post {
+                            initPlayer(currentTrackIndex, true)
+                            setupCompletionListener()
+                        }
+                    } else {
+                        mainHandler.post {
+                            musicMediaPlayer?.seekTo(0)
+                            musicMediaPlayer?.start()
+                        }
+                    }
+                }
+            }
+        }
+
+        val updateSeekBar = object : Runnable {
+            override fun run() {
+                musicMediaPlayer?.let { mp ->
+                    if (!isSeeking && mp.isPlaying) {
+                        val current = mp.currentPosition / 1000
+                        val total = mp.duration / 1000
+                        if (total > 0) {
+                            seekBar.progress = (current * 100 / total)
+                            tvCurrentTime.text = formatTime(current)
+                        }
+                    }
+                }
+                dialogView.postDelayed(this, 500)
+            }
+        }
+
+        // Инициализация
+        // Инициализация — НЕ пересоздаём плеер, если он уже есть
+        if (musicMediaPlayer == null) {
+            initPlayer(currentTrackIndex, false)
+            setupCompletionListener()
+        } else {
+            // Обновляем UI для текущего трека
+            updateUIForCurrentTrack()
+            val total = musicMediaPlayer?.duration?.div(1000) ?: 0
+            if (total > 0) {
+                tvDuration.text = formatTime(total)
+                seekBar.max = 100
+                val current = musicMediaPlayer?.currentPosition?.div(1000) ?: 0
+                seekBar.progress = (current * 100 / total)
+                tvCurrentTime.text = formatTime(current)
+            }
+        }
+
+        seekBar.setOnSeekBarChangeListener(object : SeekBar.OnSeekBarChangeListener {
+            override fun onProgressChanged(seekBar: SeekBar?, progress: Int, fromUser: Boolean) {
+                if (fromUser) {
+                    musicMediaPlayer?.let { mp ->
+                        val total = mp.duration / 1000
+                        val newPosition = (progress / 100.0) * total
+                        tvCurrentTime.text = formatTime(newPosition.toInt())
+                    }
+                }
+            }
+
+            override fun onStartTrackingTouch(seekBar: SeekBar?) {
+                isSeeking = true
+            }
+
+            override fun onStopTrackingTouch(seekBar: SeekBar?) {
+                isSeeking = false
+                musicMediaPlayer?.let { mp ->
+                    val total = mp.duration
+                    val newPosition = (seekBar?.progress ?: 0) * total / 100
+                    mp.seekTo(newPosition)
+                }
+            }
+        })
 
         btnPlay.setOnClickListener {
-            if (!musicMediaPlayer.isPlaying) {
-                musicMediaPlayer.start()
-                Toast.makeText(this, "Музыка играет", Toast.LENGTH_SHORT).show()
-            } else {
-                Toast.makeText(this, "Музыка уже играет", Toast.LENGTH_SHORT).show()
-            }
-        }
-
-        btnStop.setOnClickListener {
-            if (musicMediaPlayer.isPlaying) {
-                musicMediaPlayer.pause()
-                Toast.makeText(this, "Музыка остановлена", Toast.LENGTH_SHORT).show()
-            } else {
-                Toast.makeText(this, "Музыка уже остановлена", Toast.LENGTH_SHORT).show()
-            }
-        }
-
-        btnRestart.setOnClickListener {
-            if (::musicMediaPlayer.isInitialized) {
-                musicMediaPlayer.seekTo(0)  // перематываем на начало
-                if (!musicMediaPlayer.isPlaying) {
-                    musicMediaPlayer.start()  // если была на паузе — запускаем
+            musicMediaPlayer?.let {
+                if (!it.isPlaying) {
+                    it.start()
+                    Toast.makeText(this, "▶ ${trackDisplayNames[currentTrackIndex]}", Toast.LENGTH_SHORT).show()
+                    updateSeekBar.run()
                 }
-                Toast.makeText(this, "Трек начался заново", Toast.LENGTH_SHORT).show()
             }
+        }
+
+        btnPause.setOnClickListener {
+            musicMediaPlayer?.let {
+                if (it.isPlaying) {
+                    it.pause()
+                    Toast.makeText(this, "⏸ Пауза", Toast.LENGTH_SHORT).show()
+                }
+            }
+        }
+
+        btnPrevious.setOnClickListener {
+            isUserSwitching = true
+            currentTrackIndex = if (currentTrackIndex - 1 < 0) trackFileNames.size - 1 else currentTrackIndex - 1
+            initPlayer(currentTrackIndex, true)
+            setupCompletionListener()
+            Toast.makeText(this, "◀ ${trackDisplayNames[currentTrackIndex]}", Toast.LENGTH_SHORT).show()
+            updateSeekBar.run()
+            isUserSwitching = false
+        }
+
+        btnNext.setOnClickListener {
+            isUserSwitching = true
+            currentTrackIndex = (currentTrackIndex + 1) % trackFileNames.size
+            initPlayer(currentTrackIndex, true)
+            setupCompletionListener()
+            Toast.makeText(this, "${trackDisplayNames[currentTrackIndex]} ▶", Toast.LENGTH_SHORT).show()
+            updateSeekBar.run()
+            isUserSwitching = false
+        }
+
+        btnRepeat.setOnClickListener {
+            isRepeatEnabled = !isRepeatEnabled
+            val status = if (isRepeatEnabled) "ВКЛ" else "ВЫКЛ"
+            Toast.makeText(this, "Повтор $status", Toast.LENGTH_SHORT).show()
+        }
+
+        dialog.setOnDismissListener {
+            dialogView.removeCallbacks(updateSeekBar)
         }
 
         dialog.show()
     }
 
     override fun onDestroy() {
-        mediaPlayer?.release()
         soundAdd?.release()
         soundSub?.release()
         soundMul?.release()
         soundDiv?.release()
         soundEq?.release()
         soundClear?.release()
+        musicMediaPlayer?.release()
         super.onDestroy()
     }
 }
